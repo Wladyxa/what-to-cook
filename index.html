@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Что приготовить</title>
+  <meta name="description" content="Нажми кнопку и получи три идеи, что приготовить: рецепт, КБЖУ и список покупок.">
+  <meta name="theme-color" content="#FFF6EE" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1F1A19" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Что готовим">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="view" class="view"></main>
+
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="home" class="active"><span class="ti">🎲</span><span>Идеи</span></button>
+    <button data-tab="fav"><span class="ti">💛</span><span>Любимое</span></button>
+    <button data-tab="cart"><span class="ti">🛒</span><span>Покупки</span><i class="badge" id="cartBadge" hidden></i></button>
+    <button data-tab="settings"><span class="ti">⚙️</span><span>Ещё</span></button>
+  </nav>
+
+  <div id="sheet" class="sheet" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="recipes.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
