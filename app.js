@@ -97,6 +97,26 @@ const clampInt = (v, min, max, def) => { const n = Math.round(Number(v)); return
 const divK = (t, n) => ({ kcal: t.kcal / n, p: t.p / n, f: t.f / n, c: t.c / n });
 const mulK = (t, n) => ({ kcal: t.kcal * n, p: t.p * n, f: t.f * n, c: t.c * n });
 
+// ───────── цены выбранного магазина ─────────
+const STORES = { avg: 'Среднее по трём', '5ka': 'Пятёрочка', perekrestok: 'Перекрёсток', auchan: 'Ашан' };
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+function applyStore(store) {
+  if (typeof STORE_PRICES === 'undefined') return;
+  for (const [key, pr] of Object.entries(PRODUCTS)) {
+    const sp = STORE_PRICES[key];
+    if (!sp) continue;
+    const pick = sp[store];
+    // На развес и для «среднего» оставляем нашу упаковку и пересчитываем цену за грамм
+    if (!pick || pr.loose || pick.perKg) {
+      const ppg = pick ? pick.ppg : median(Object.values(sp).map((x) => x.ppg));
+      pr.pack = { ...pr.pack, price: ppg * pr.pack.g };
+    } else {
+      pr.pack = { g: pick.g, label: pick.label, price: pick.price };
+    }
+  }
+}
+applyStore(state.settings.store || 'avg');
+
 const DB = RECIPES.map(buildDbRecipe);
 let AI = state.ai.map(buildAiRecipe);
 const byId = new Map();
@@ -398,7 +418,7 @@ function viewCart() {
   <div class="dishes">${state.cart.map(({ id, mult }) => { const r = getR(id); return r ? `
     <span class="dish-chip"><button data-act="open" data-id="${esc(id)}">${esc(r.emoji)} ${esc(r.name)}${mult !== 1 ? ` ×${fmtNum(mult, 1)}` : ''}</button><button class="x" data-act="uncart" data-id="${esc(id)}" aria-label="Убрать">✕</button></span>` : ''; }).join('')}</div>
   <div class="total-card">
-    <div><small>Примерно в магазине</small><b>${rub(total)}</b></div>
+    <div><small>Примерно в магазине${(state.settings.store || 'avg') !== 'avg' ? ' · ' + STORES[state.settings.store] : ''}</small><b>${rub(total)}</b></div>
     <div><small>Осталось купить</small><b>${rub(left)}</b></div>
   </div>
   ${groups.map(([sec, l]) => `<h2 class="sec">${SECTIONS[sec].emoji} ${SECTIONS[sec].name}</h2><div class="buy-list">${l.map(row).join('')}</div>`).join('')}
@@ -407,7 +427,7 @@ function viewCart() {
     <button class="btn" data-act="share">📤 Отправить список</button>
     <button class="btn ghost" data-act="clearCart">Очистить</button>
   </div>
-  <p class="muted small center">Цены ориентировочные, по средним ценам сетевых супермаркетов. Упаковки округлены вверх.</p>`;
+  <p class="muted small center">Цены по данным магазинов на октябрь 2026, без акций. Упаковки округлены вверх.</p>`;
 }
 
 function viewSettings() {
@@ -434,6 +454,12 @@ function viewSettings() {
     <p class="muted small">Ключ хранится только на этом телефоне и отправляется лишь в OpenRouter. Ключ берётся на openrouter.ai → Keys. КБЖУ и цены у ИИ-рецептов — оценка модели.</p>
   </section>
   <section class="panel">
+    <h2>🛒 Цены из магазина</h2>
+    <p class="muted">По ним считается стоимость блюд и список покупок.</p>
+    <div class="presets">${Object.entries(STORES).map(([k, n]) => `<button class="chip soft ${(s.store || 'avg') === k ? 'on' : ''}" data-act="store" data-s="${k}">${n}</button>`).join('')}</div>
+    <p class="muted small">${typeof PRICES_DATE !== 'undefined' ? `Обычные цены без акций, Москва, на ${new Date(PRICES_DATE).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}.` : ''} Если товара нет в магазине, берётся средняя цена.</p>
+  </section>
+  <section class="panel">
     <h2>📱 Установка на iPhone</h2>
     <ol class="steps-s"><li>Открой эту страницу в Safari.</li><li>Нажми «Поделиться» (квадрат со стрелкой).</li><li>Выбери «На экран Домой» → «Добавить».</li></ol>
   </section>
@@ -443,7 +469,7 @@ function viewSettings() {
       <button class="btn ghost" data-act="resetHidden" ${state.dislikes.length ? '' : 'disabled'}>Вернуть скрытые блюда (${state.dislikes.length})</button>
       <button class="btn ghost" data-act="clearAi" ${state.ai.length ? '' : 'disabled'}>Удалить ИИ-рецепты (${state.ai.length})</button>
     </div>
-    <p class="muted small">В книге ${DB.length} рецептов. КБЖУ считается по граммовкам сырых продуктов. Цены — ориентир по сетевым магазинам РФ, осень 2026.</p>
+    <p class="muted small">В книге ${DB.length} рецептов. КБЖУ считается по граммовкам сырых продуктов. Цены — по Пятёрочке, Перекрёстку и Ашану; для редких продуктов — ориентировочные.</p>
   </section>
   <p class="muted small center">Сделано с любовью 💛</p>`;
 }
@@ -502,6 +528,7 @@ function viewDetail() {
     <h3 class="sec">👩‍🍳 Как готовить</h3>
     <ol class="steps">${r.steps.map((s, i) => `<li class="${d.done.includes(i) ? 'done' : ''}" data-act="step" data-i="${i}"><span class="n">${i + 1}</span><span>${esc(s)}</span></li>`).join('')}</ol>
     <p class="muted small center">Нажми на шаг, чтобы отметить его выполненным</p>
+    ${r.src ? `<p class="muted small center">Источник рецепта: <a class="src" href="${esc(r.src)}" target="_blank" rel="noopener noreferrer">russianfood.com</a></p>` : ''}
 
     ${sims.length ? `<h3 class="sec">Похожие блюда</h3><div class="scroller">${sims.map(miniCard).join('')}</div>` : ''}
     <button class="link center-b" data-act="dislike" data-id="${esc(r.id)}">${state.dislikes.includes(r.id) ? '↩︎ Снова предлагать это блюдо' : '🙅 Не предлагать это блюдо'}</button>
@@ -623,6 +650,11 @@ const actions = {
   },
   closeTip: () => { store.set('tipClosed', true); render(); },
   showKey: () => { const i = $('#apiKey'); i.type = i.type === 'password' ? 'text' : 'password'; },
+  store: (el) => {
+    state.settings = { ...state.settings, store: el.dataset.s };
+    save('settings');
+    location.reload();
+  },
   pickModel: () => openPicker(),
   closePicker: () => closePicker(),
   pickFilter: (el) => { picker.filter = el.dataset.f; renderPickerList(); },
