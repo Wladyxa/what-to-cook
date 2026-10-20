@@ -1,6 +1,6 @@
 // Офлайн-кэш приложения. При изменении файлов увеличь версию.
-const CACHE = 'wtc-v3';
-const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'recipes.js', 'recipes-rf.js', 'manifest.webmanifest',
+const CACHE = 'wtc-v4';
+const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'recipes.js', 'recipes-rf.js', 'prices.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
