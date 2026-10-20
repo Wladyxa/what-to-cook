@@ -327,3 +327,21 @@ h1, h2, h3 { margin: 0; line-height: 1.15; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* выбор модели */
+.picker { z-index: 40; }
+.picker .sheet-bar b { font-size: 17px; }
+.select {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  padding: 11px 14px; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--line); text-align: left;
+}
+.select span, .mrow span { display: grid; min-width: 0; }
+.select b, .mrow b { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select small, .mrow small { color: var(--muted); font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select i, .mrow i { font-style: normal; color: var(--accent); font-weight: 800; }
+.search { width: 100%; margin: 8px 0 4px; padding: 12px 14px; border-radius: 14px; border: 0; background: var(--card); box-shadow: inset 0 0 0 1.5px var(--line); outline: none; font-size: 16px; }
+.search:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+.mrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 12px 14px; border-top: 1px solid var(--line); text-align: left; }
+.mrow:first-child { border-top: 0; }
+.mrow.on { background: var(--accent-soft); }
+.spin.dark { border-color: var(--line); border-top-color: var(--accent); }

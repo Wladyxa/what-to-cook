@@ -2,6 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://openrouter.ai; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Что приготовить</title>
   <meta name="description" content="Нажми кнопку и получи три идеи, что приготовить: рецепт, КБЖУ и список покупок.">
@@ -27,6 +29,7 @@
   </nav>
 
   <div id="sheet" class="sheet" hidden></div>
+  <div id="picker" class="sheet picker" hidden></div>
   <div id="toast" class="toast" hidden></div>
 
   <script src="recipes.js"></script>

@@ -418,14 +418,14 @@ function viewSettings() {
     <h2>✨ ИИ через OpenRouter</h2>
     <p class="muted">По желанию. Без ключа приложение работает на встроенной книге рецептов. С ключом можно придумывать новые блюда по пожеланию.</p>
     <label class="field"><span>Ключ API</span>
-      <div class="ai-row"><input id="apiKey" type="password" autocomplete="off" placeholder="sk-or-v1-…" value="${esc(s.key)}">
-      <button class="btn ghost sm" data-act="showKey">👁</button></div>
+      <div class="ai-row"><input id="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-or-v1-…" value="${esc(state.keyDraft ?? s.key)}">
+      <button class="btn ghost sm" data-act="showKey" aria-label="Показать ключ">👁</button></div>
     </label>
-    <label class="field"><span>Модель</span>
-      <input id="model" type="text" list="models" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.model)}">
-      <datalist id="models">${MODEL_PRESETS.map((m) => `<option value="${m}">`).join('')}</datalist>
-    </label>
-    <div class="presets">${MODEL_PRESETS.map((m) => `<button class="chip soft ${s.model === m ? 'on' : ''}" data-act="model" data-m="${m}">${m.split('/')[1]}</button>`).join('')}</div>
+    <div class="field"><span>Модель</span>
+      <button class="select" data-act="pickModel">
+        <span><b>${esc(modelName(s.model))}</b><small>${esc(s.model)}</small></span><i>▾</i>
+      </button>
+    </div>
     <div class="cart-actions">
       <button class="btn" data-act="saveAi">Сохранить</button>
       <button class="btn ghost" data-act="testKey">Проверить ключ</button>
@@ -623,9 +623,19 @@ const actions = {
   },
   closeTip: () => { store.set('tipClosed', true); render(); },
   showKey: () => { const i = $('#apiKey'); i.type = i.type === 'password' ? 'text' : 'password'; },
-  model: (el) => { $('#model').value = el.dataset.m; document.querySelectorAll('.presets .chip').forEach((c) => c.classList.toggle('on', c === el)); },
+  pickModel: () => openPicker(),
+  closePicker: () => closePicker(),
+  pickFilter: (el) => { picker.filter = el.dataset.f; renderPickerList(); },
+  setModel: (el) => {
+    state.settings = { ...state.settings, model: el.dataset.m };
+    save('settings');
+    closePicker();
+    render();
+    toast('Модель выбрана ✨');
+  },
   saveAi: () => {
-    state.settings = { key: $('#apiKey').value.trim(), model: $('#model').value.trim() || MODEL_PRESETS[0] };
+    state.settings = { ...state.settings, key: $('#apiKey').value.trim() };
+    state.keyDraft = undefined;
     save('settings');
     toast(state.settings.key ? 'Сохранено. ИИ появился на главной ✨' : 'Сохранено');
   },
@@ -668,8 +678,95 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.matches('input[data-act="check"]')) actions.check(e.target);
 });
-document.addEventListener('input', (e) => { if (e.target.id === 'wish') state.wish = e.target.value; });
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'wish') state.wish = e.target.value;
+  if (e.target.id === 'apiKey') state.keyDraft = e.target.value;
+  if (e.target.id === 'modelSearch') { picker.q = e.target.value; renderPickerList(); }
+});
 document.addEventListener('keydown', (e) => { if (e.target.id === 'wish' && e.key === 'Enter') generateAi(); });
+
+// ───────── выбор модели OpenRouter ─────────
+// Список моделей публичный, ключ для него не нужен. Кэшируем на сутки для офлайна.
+const picker = { models: store.get('models', null), loading: false, error: '', q: '', filter: 'all' };
+
+function modelName(id) {
+  const m = picker.models?.list.find((x) => x.id === id);
+  return m ? m.name : id.split('/').pop();
+}
+function perMillion(x) { return Number(x) * 1e6; }
+function priceText(m) {
+  if (m.free) return 'бесплатно';
+  const fmt = (v) => '$' + (v < 1 ? round(v, 2) : round(v, 1));
+  return `${fmt(m.in)} / ${fmt(m.out)} за 1М токенов`;
+}
+async function loadModels() {
+  const fresh = picker.models && Date.now() - picker.models.at < 24 * 3600e3;
+  if (fresh || picker.loading) return;
+  picker.loading = true; picker.error = '';
+  renderPickerList();
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models');
+    if (!res.ok) throw new Error('Ошибка ' + res.status);
+    const j = await res.json();
+    const list = (j.data || [])
+      .filter((m) => m && typeof m.id === 'string' && !(m.architecture?.output_modalities || ['text']).every((x) => x !== 'text'))
+      .map((m) => {
+        const inP = perMillion(m.pricing?.prompt || 0), outP = perMillion(m.pricing?.completion || 0);
+        return { id: m.id, name: String(m.name || m.id), in: inP, out: outP, free: inP === 0 && outP === 0, ctx: m.context_length || 0 };
+      });
+    picker.models = { at: Date.now(), list };
+    store.set('models', picker.models);
+  } catch (e) {
+    picker.error = picker.models ? 'Нет связи, показываю сохранённый список.' : 'Не удалось загрузить список моделей. Проверь интернет.';
+  } finally {
+    picker.loading = false;
+    renderPickerList();
+  }
+}
+function openPicker() {
+  picker.q = '';
+  const el = $('#picker');
+  el.innerHTML = `
+  <div class="sheet-inner">
+    <div class="sheet-bar"><button class="round" data-act="closePicker" aria-label="Закрыть">←</button><b>Модель ИИ</b><span style="width:44px"></span></div>
+    <input id="modelSearch" class="search" type="search" placeholder="Поиск: gemini, gpt, claude, deepseek…" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="chips" id="pickFilters"></div>
+    <div id="modelList"></div>
+  </div>`;
+  el.hidden = false;
+  el.classList.remove('in'); void el.offsetWidth; el.classList.add('in');
+  document.body.classList.add('locked');
+  renderPickerList();
+  loadModels();
+}
+function closePicker() {
+  const el = $('#picker');
+  el.hidden = true; el.innerHTML = '';
+  if (!state.detail) document.body.classList.remove('locked');
+}
+function renderPickerList() {
+  const box = $('#modelList');
+  if (!box) return;
+  const all = picker.models?.list || MODEL_PRESETS.map((id) => ({ id, name: id.split('/').pop(), free: false, in: NaN }));
+  const q = picker.q.trim().toLowerCase();
+  let list = all.filter((m) => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  if (picker.filter === 'free') list = list.filter((m) => m.free);
+  if (picker.filter === 'top') list = MODEL_PRESETS.map((id) => list.find((m) => m.id === id)).filter(Boolean);
+  $('#pickFilters').innerHTML = [['all', `Все ${picker.models ? picker.models.list.length : ''}`], ['top', '⭐ Советую'], ['free', '🆓 Бесплатные']]
+    .map(([f, l]) => `<button class="chip soft ${picker.filter === f ? 'on' : ''}" data-act="pickFilter" data-f="${f}">${l}</button>`).join('');
+  const cur = state.settings.model;
+  const custom = q && !all.some((m) => m.id.toLowerCase() === q) && /^[\w.-]+\/[\w.:-]+$/.test(q)
+    ? `<button class="mrow" data-act="setModel" data-m="${esc(picker.q.trim())}"><span><b>Использовать «${esc(picker.q.trim())}»</b><small>свой ID модели</small></span></button>` : '';
+  box.innerHTML = `
+    ${picker.loading ? '<p class="muted center"><span class="spin dark"></span> Загружаю список моделей…</p>' : ''}
+    ${picker.error ? `<p class="err center">${esc(picker.error)}</p>` : ''}
+    <div class="buy-list">${custom}${list.slice(0, 300).map((m) => `
+      <button class="mrow ${m.id === cur ? 'on' : ''}" data-act="setModel" data-m="${esc(m.id)}">
+        <span><b>${esc(m.name)}</b><small>${esc(m.id)}${Number.isFinite(m.in) || m.free ? ' · ' + priceText(m) : ''}</small></span>${m.id === cur ? '<i>✓</i>' : ''}
+      </button>`).join('') || (custom ? '' : '<p class="muted center">Ничего не нашлось</p>')}</div>
+    ${list.length > 300 ? '<p class="muted small center">Показаны первые 300. Уточни поиск.</p>' : ''}
+    <p class="muted small center">Цена — за миллион токенов (запрос / ответ). Один рецепт обычно ~3 тыс. токенов.</p>`;
+}
 
 // ───────── ИИ (OpenRouter) ─────────
 function aiPrompt() {
