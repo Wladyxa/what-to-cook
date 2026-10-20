@@ -345,3 +345,5 @@ h1, h2, h3 { margin: 0; line-height: 1.15; }
 .mrow:first-child { border-top: 0; }
 .mrow.on { background: var(--accent-soft); }
 .spin.dark { border-color: var(--line); border-top-color: var(--accent); }
+
+.src { color: var(--accent); font-weight: 700; }
