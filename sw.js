@@ -1,5 +1,5 @@
 // Офлайн-кэш приложения. При изменении файлов увеличь версию.
-const CACHE = 'wtc-v5';
+const CACHE = 'wtc-v6';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'recipes.js', 'recipes-rf.js', 'recipes-ic.js', 'prices.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
