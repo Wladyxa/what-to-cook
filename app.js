@@ -528,7 +528,7 @@ function viewDetail() {
     <h3 class="sec">👩‍🍳 Как готовить</h3>
     <ol class="steps">${r.steps.map((s, i) => `<li class="${d.done.includes(i) ? 'done' : ''}" data-act="step" data-i="${i}"><span class="n">${i + 1}</span><span>${esc(s)}</span></li>`).join('')}</ol>
     <p class="muted small center">Нажми на шаг, чтобы отметить его выполненным</p>
-    ${r.src ? `<p class="muted small center">Источник рецепта: <a class="src" href="${esc(r.src)}" target="_blank" rel="noopener noreferrer">russianfood.com</a></p>` : ''}
+    ${r.src ? `<p class="muted small center">Источник рецепта: <a class="src" href="${esc(r.src)}" target="_blank" rel="noopener noreferrer">${esc(new URL(r.src).hostname.replace(/^(www|m)\./, ''))}</a></p>` : ''}
 
     ${sims.length ? `<h3 class="sec">Похожие блюда</h3><div class="scroller">${sims.map(miniCard).join('')}</div>` : ''}
     <button class="link center-b" data-act="dislike" data-id="${esc(r.id)}">${state.dislikes.includes(r.id) ? '↩︎ Снова предлагать это блюдо' : '🙅 Не предлагать это блюдо'}</button>

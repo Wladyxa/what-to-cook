@@ -1,4 +1,4 @@
-// Рецепты с russianfood.com (шаги пересказаны), сгенерировано scripts/import_russianfood.py.
+// Рецепты с russianfood.com (шаги пересказаны), сгенерировано scripts/import_recipes.py.
 // Не правь вручную: меняй data/recipes.json или скрипт и запускай его заново.
 RECIPES.push(...[
  {
@@ -335,7 +335,7 @@ RECIPES.push(...[
  {
   "id": "rf-20843",
   "name": "Щи из квашеной капусты с картофелем и мясом",
-  "emoji": "🍲",
+  "emoji": "🥔",
   "cat": "soup",
   "time": 100,
   "servings": 4,
@@ -475,7 +475,7 @@ RECIPES.push(...[
  {
   "id": "rf-156000",
   "name": "Томатный суп с курицей, фасолью и овощами",
-  "emoji": "🍅",
+  "emoji": "🍲",
   "cat": "soup",
   "time": 40,
   "servings": 4,
@@ -545,7 +545,7 @@ RECIPES.push(...[
  {
   "id": "rf-158036",
   "name": "Сырный суп с шампиньонами",
-  "emoji": "🧀",
+  "emoji": "🍲",
   "cat": "soup",
   "time": 45,
   "servings": 6,
@@ -1071,7 +1071,7 @@ RECIPES.push(...[
  {
   "id": "rf-165680",
   "name": "Рыба, запечённая с картошкой, сыром и сметаной",
-  "emoji": "🐟",
+  "emoji": "🥔",
   "cat": "main",
   "time": 75,
   "servings": 4,
@@ -1310,7 +1310,7 @@ RECIPES.push(...[
  {
   "id": "rf-141860",
   "name": "Котлеты из куриного фарша",
-  "emoji": "🍔",
+  "emoji": "🍗",
   "cat": "main",
   "time": 30,
   "servings": 4,
@@ -1437,7 +1437,7 @@ RECIPES.push(...[
  {
   "id": "rf-126983",
   "name": "Куриная печень в сметанном соусе",
-  "emoji": "🍖",
+  "emoji": "🍗",
   "cat": "main",
   "time": 20,
   "servings": 4,
@@ -1604,7 +1604,7 @@ RECIPES.push(...[
  {
   "id": "rf-167951",
   "name": "Овощное рагу с баклажанами, кабачками и картофелем",
-  "emoji": "🥘",
+  "emoji": "🥔",
   "cat": "main",
   "time": 40,
   "servings": 3,
@@ -1667,7 +1667,7 @@ RECIPES.push(...[
  {
   "id": "rf-151152",
   "name": "Гречка с куриным филе",
-  "emoji": "🍛",
+  "emoji": "🍗",
   "cat": "main",
   "time": 50,
   "servings": 5,
@@ -1713,7 +1713,7 @@ RECIPES.push(...[
  {
   "id": "rf-162583",
   "name": "Рагу с курицей, кабачками и сметаной",
-  "emoji": "🥘",
+  "emoji": "🥒",
   "cat": "main",
   "time": 50,
   "servings": 4,
@@ -1776,7 +1776,7 @@ RECIPES.push(...[
  {
   "id": "rf-158435",
   "name": "Цветная капуста, запечённая в сметанно-чесночном соусе под сыром",
-  "emoji": "🥦",
+  "emoji": "🥬",
   "cat": "main",
   "time": 35,
   "servings": 3,
