@@ -39,6 +39,8 @@ const state = {
   checked: store.get('checked', {}),        // ключ продукта → куплено
   ai: store.get('ai', []),                  // сохранённые ИИ-рецепты (сырые)
   settings: store.get('settings', { key: '', model: 'google/gemini-2.5-flash' }),
+  slots: store.get('slots', []),            // подписи «Завтрак / Обед / Ужин» к трём вариантам
+  aiSlots: store.get('aiSlots', []),
   detail: null,                             // { id, mult, per: 'serving'|'dish', done: [] }
   aiLoading: false,
   aiError: '',
@@ -66,7 +68,7 @@ function buildDbRecipe(raw) {
     total.c += it.g / 100 * it.nutr.c;
     cost += it.g / it.pack.g * it.pack.price;
   }
-  return { ...raw, source: 'db', items, total, per: divK(total, raw.servings), cost };
+  return enrich({ ...raw, source: 'db', items, total, per: divK(total, raw.servings), cost });
 }
 
 function buildAiRecipe(raw) {
@@ -84,14 +86,44 @@ function buildAiRecipe(raw) {
   const ps = raw.per_serving || {};
   const per = { kcal: +ps.kcal || 0, p: +ps.p || 0, f: +ps.f || 0, c: +ps.c || 0 };
   const cost = items.reduce((s, it) => s + it.g / it.pack.g * it.pack.price, 0);
-  return {
-    id: raw.id, name: String(raw.name || 'Блюдо'), emoji: raw.emoji || '✨',
+  return enrich({
+    id: raw.id, name: String(raw.name || 'Блюдо'), emoji: raw.emoji || '✨', own: !!raw.own, kids: !!raw.kids,
     cat: CATEGORIES[raw.category] ? raw.category : 'main', time: clampInt(raw.time, 5, 300, 30), servings,
     tags: Array.isArray(raw.tags) ? raw.tags.slice(0, 6).map(String) : [], healthy: !!raw.healthy,
     steps: Array.isArray(raw.steps) ? raw.steps.map(String) : [], source: 'ai', items,
     per, total: mulK(per, servings), cost,
-  };
+  });
 }
+
+// ───────── лёгкость, «детское», аллергены ─────────
+// heavy: 0 — лёгкое блюдо, 1+ — тяжёлое (жирное, мучное, калорийное, с майонезом/салом)
+const FLOURY = new Set(['flour', 'semolina', 'pasta', 'white_loaf', 'lavash', 'breadcrumbs', 'starch', 'bread']);
+const FLOURY_RE = /мук|макарон|спагет|лапш|вермишел|тесто|батон|хлеб|лаваш|манк|крахмал/i;
+const HEAVY_KEYS = { mayo: 1.5, lard: 1.5, heavy_cream: 0.8, processed_cheese: 0.6 };
+const HEAVY_RE = /майонез|сало|сливки (2|3)/i;
+function enrich(r) {
+  const k = r.per, kcal = k.kcal || 1;
+  const fatShare = k.f * 9 / kcal;
+  const solid = r.items.filter((i) => !i.pantry);
+  const weight = solid.reduce((s, i) => s + i.g, 0) || 1;
+  const isAi = (i) => i.key.startsWith('x:');
+  const flour = solid.filter((i) => FLOURY.has(i.key) || (isAi(i) && FLOURY_RE.test(i.name))).reduce((s, i) => s + i.g, 0) / weight;
+  let h = 0;
+  if (kcal > 600) h += (kcal - 600) / 150;
+  if (fatShare > 0.45) h += (fatShare - 0.45) * 6;
+  const flourLimit = r.cat === 'dessert' ? 0.4 : 0.25;
+  if (flour > flourLimit) h += (flour - flourLimit) * 4;
+  for (const i of r.items) h += HEAVY_KEYS[i.key] || (isAi(i) && HEAVY_RE.test(i.name) ? 1.2 : 0);
+  r.heavy = round(h, 2);
+  r.kids = !!r.kids || KIDS.has(r.id) || r.tags.includes('детям') || /детск|школьн/i.test(r.name);
+  r.allergens = Object.entries(ALLERGENS)
+    .filter(([, al]) => r.items.some((i) => al.keys.includes(i.key) || (isAi(i) && al.re.test(i.name))))
+    .map(([id]) => id);
+  return r;
+}
+const myAllergens = () => state.settings.allergens || ['honey'];
+const warnFor = (r) => r.allergens.filter((a) => myAllergens().includes(a));
+const hasAllergen = (it) => myAllergens().some((a) => ALLERGENS[a].keys.includes(it.key) || (it.key.startsWith('x:') && ALLERGENS[a].re.test(it.name)));
 
 const clampInt = (v, min, max, def) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def; };
 const divK = (t, n) => ({ kcal: t.kcal / n, p: t.p / n, f: t.f / n, c: t.c / n });
@@ -123,7 +155,7 @@ const byId = new Map();
 function reindex() { byId.clear(); for (const r of [...DB, ...AI]) byId.set(r.id, r); }
 reindex();
 const getR = (id) => byId.get(id);
-const pool = () => [...DB, ...AI.filter((r) => state.likes.includes(r.id))];
+const pool = () => [...DB, ...AI.filter((r) => r.own || state.likes.includes(r.id))];
 
 // ───────── похожесть и рекомендации ─────────
 const featCache = new Map();
@@ -166,36 +198,67 @@ function similar(r, n = 6) {
 }
 
 // ───────── три варианта ─────────
+const MEALS = [
+  { label: '☀️ Завтрак', cats: { breakfast: 1 } },
+  { label: '🍲 Обед', cats: { soup: 1.6, main: 1 } },
+  { label: '🌙 Ужин', cats: { main: 1, salad: 0.7 } },
+];
+const dayMode = () => state.filter.cat === 'all' || state.filter.cat === 'kids';
 function matchesFilter(r) {
   const f = state.filter;
-  if (f.cat !== 'all' && r.cat !== f.cat) return false;
+  if (f.cat === 'kids' && !r.kids) return false;
+  if (!dayMode() && r.cat !== f.cat) return false;
   if (f.quick && r.time > 30) return false;
   if (f.healthy && !r.healthy) return false;
   if (f.light && r.per.kcal > 450) return false;
   return true;
 }
+// Вес блюда при случайном выборе: лёгкое, сытное (белок) и похожее на любимое — чаще
+function weightOf(r) {
+  let w = (1 + 3 * Math.max(0, taste(r))) * Math.exp(-1.6 * r.heavy);
+  if (r.healthy) w *= 1.25;
+  if ((r.cat === 'main' || r.cat === 'soup') && r.per.p >= 15) w *= 1.3;
+  return w;
+}
+function pickWeighted(weights) {
+  const total = [...weights.values()].reduce((a, b) => a + b, 0);
+  let x = Math.random() * total;
+  for (const [k, w] of weights) { x -= w; if (x <= 0) return k; }
+  return [...weights.keys()][0];
+}
 function roll() {
   let cands = pool().filter((r) => matchesFilter(r) && !state.dislikes.includes(r.id));
   const fresh = cands.filter((r) => !state.recent.includes(r.id) && !state.current.includes(r.id));
-  if (fresh.length >= 3) cands = fresh;
-  const weights = new Map(cands.map((r) => [r.id, 1 + 3 * Math.max(0, taste(r)) + (r.healthy ? 0.3 : 0)]));
-  const picked = [];
-  while (picked.length < 3 && weights.size) {
-    const total = [...weights.values()].reduce((a, b) => a + b, 0);
-    let x = Math.random() * total, id = null;
-    for (const [k, w] of weights) { x -= w; if (x <= 0) { id = k; break; } }
-    id = id || [...weights.keys()][0];
-    picked.push(id);
-    weights.delete(id);
-    // В режиме «любое» стараемся показать разные категории
-    if (state.filter.cat === 'all') {
-      const cat = getR(id).cat;
-      for (const [k, w] of weights) if (getR(k).cat === cat) weights.set(k, w * 0.12);
+  if (fresh.length >= 9) cands = fresh;
+  const picked = [], slots = [];
+  if (dayMode()) {
+    // Меню на день: завтрак, обед, ужин
+    for (const meal of MEALS) {
+      const weights = new Map();
+      for (const r of cands) {
+        if (picked.includes(r.id) || !meal.cats[r.cat]) continue;
+        let w = weightOf(r) * meal.cats[r.cat];
+        if (meal.label.includes('Ужин') && r.per.kcal > 550) w *= 0.35;
+        // ужин не повторяет обед по основным продуктам
+        if (picked.length && picked.some((id) => sim(getR(id), r) > 0.35)) w *= 0.3;
+        weights.set(r.id, w);
+      }
+      if (!weights.size) continue;
+      picked.push(pickWeighted(weights));
+      slots.push(meal.label);
+    }
+  } else {
+    const weights = new Map(cands.map((r) => [r.id, weightOf(r)]));
+    while (picked.length < 3 && weights.size) {
+      const id = pickWeighted(weights);
+      picked.push(id);
+      weights.delete(id);
     }
   }
   state.current = picked;
-  state.recent = [...picked, ...state.recent].slice(0, 15);
-  save('current', 'recent');
+  state.slots = slots;
+  state.recent = [...picked, ...state.recent].slice(0, 24);
+  save('current', 'recent', 'slots');
 }
 
 // ───────── количества ─────────
@@ -284,7 +347,7 @@ const MASCOT = `
 
 function catChip(cat) {
   const c = CATEGORIES[cat];
-  return `<span class="chip-cat" style="--cc:${c.color}">${c.emoji} ${c.name}</span>`;
+  return `<span class="chip-cat" style="--cc:${c.color}">${c.emoji} ${c.one}</span>`;
 }
 function emojiBubble(r, size = '') {
   return `<div class="bubble ${size}" style="--cc:${CATEGORIES[r.cat].color}">${esc(r.emoji)}</div>`;
@@ -297,12 +360,15 @@ function macroBar(k) {
   const pk = k.p * 4, fk = k.f * 9, ck = k.c * 4, sum = pk + fk + ck || 1;
   return `<div class="mbar"><i style="flex:${pk / sum};background:var(--m-p)"></i><i style="flex:${fk / sum};background:var(--m-f)"></i><i style="flex:${ck / sum};background:var(--m-c)"></i></div>`;
 }
-function card(r, i = 0) {
+function warnChips(r) {
+  return warnFor(r).map((a) => `<span class="chip-warn">⚠️ ${ALLERGENS[a].name}</span>`).join('');
+}
+function card(r, i = 0, slot = '') {
   return `
   <article class="card pop" style="animation-delay:${i * 90}ms" data-act="open" data-id="${esc(r.id)}">
     ${emojiBubble(r)}
     <div class="card-body">
-      <div class="card-top">${catChip(r.cat)}${r.source === 'ai' ? '<span class="chip-ai">✨ ИИ</span>' : ''}</div>
+      <div class="card-top">${slot ? `<span class="chip-slot">${slot}</span>` : catChip(r.cat)}${r.source === 'ai' ? `<span class="chip-ai">${r.own ? '📝 мой' : '✨ ИИ'}</span>` : ''}${warnChips(r)}</div>
       <h3>${esc(r.name)}</h3>
       <div class="meta"><span>⏱ ${r.time} мин</span> <span>🔥 ${fmtNum(r.per.kcal)} ккал</span> <span>💰 ${rub(r.cost / r.servings)}/порц.</span></div>
       ${macroBar(r.per)}
@@ -328,7 +394,7 @@ const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
 
 function viewHome() {
   const f = state.filter;
-  const chips = [['all', '✨ Любое'], ...Object.entries(CATEGORIES).map(([k, c]) => [k, `${c.emoji} ${c.name}`])]
+  const chips = [['all', '📅 На день'], ['kids', '👶 Детям'], ...Object.entries(CATEGORIES).map(([k, c]) => [k, `${c.emoji} ${c.name}`])]
     .map(([k, label]) => `<button class="chip ${f.cat === k ? 'on' : ''}" data-act="cat" data-cat="${k}">${label}</button>`).join('');
   const toggles = [['quick', '⚡ До 30 мин'], ['healthy', '🥦 Полезное'], ['light', '🪶 До 450 ккал']]
     .map(([k, label]) => `<button class="chip soft ${f[k] ? 'on' : ''}" data-act="toggle" data-k="${k}">${label}</button>`).join('');
@@ -355,28 +421,33 @@ function viewHome() {
   <div class="chips">${chips}</div>
   <div class="chips">${toggles}</div>
   <section class="cards" id="cards">
-    ${cur.length ? cur.map(card).join('') : `<p class="empty">Нажми на кнопку, и кастрюлька предложит три блюда 💫</p>`}
+    ${cur.length ? cur.map((r, i) => card(r, i, state.slots[i])).join('') : `<p class="empty">Нажми на кнопку, и кастрюлька предложит завтрак, обед и ужин 💫</p>`}
     ${cur.length && cur.length < 3 ? `<p class="empty small">Под эти фильтры больше ничего нет. Попробуй снять пару галочек.</p>` : ''}
   </section>
   <section class="ai-box">
     ${hasKey ? `
       <h2>✨ Придумать новое с ИИ</h2>
-      <p class="muted">Напиши пожелание или оставь пустым. Учтём фильтры и твои лайки.</p>
+      <p class="muted">Только известные проверенные блюда: лёгкие, но сытные и вкусные. Учту фильтры, лайки и аллергии. Можно написать пожелание.</p>
       <div class="ai-row">
         <input id="wish" type="text" placeholder="например: из курицы и кабачка, без духовки" value="${esc(state.wish)}" enterkeyhint="go">
         <button class="btn" data-act="ai" ${state.aiLoading ? 'disabled' : ''}>${state.aiLoading ? '<span class="spin"></span>' : 'Придумать'}</button>
       </div>
       ${state.aiError ? `<p class="err">${esc(state.aiError)}</p>` : ''}
-      <div class="cards">${aiCur.map(card).join('')}</div>
+      <div class="cards">${aiCur.map((r, i) => card(r, i, state.aiSlots[i])).join('')}</div>
     ` : `<button class="link" data-act="tab" data-tab="settings">✨ Подключить ИИ, чтобы придумывать новые блюда →</button>`}
   </section>`;
 }
 
 function viewFav() {
   const liked = state.likes.map(getR).filter(Boolean);
+  const own = AI.filter((r) => r.own);
   const recs = recommendations();
+  const groups = [...Object.entries(CATEGORIES).map(([k, c]) => [c, DB.filter((r) => r.cat === k)]),
+    [{ emoji: '👶', name: 'Детям' }, DB.filter((r) => r.kids)]];
   return `
   <header class="hero small"><h1>Любимое</h1></header>
+  <button class="big-btn wide soft-btn" data-act="addOpen">➕ Добавить свой рецепт</button>
+  ${own.length ? `<h2 class="sec">Мои рецепты <span class="count">${own.length}</span></h2><div class="scroller">${own.map(miniCard).join('')}</div>` : ''}
   ${recs.length ? `<h2 class="sec">Тебе может понравиться</h2><div class="scroller">${recs.map(miniCard).join('')}</div>` : ''}
   <h2 class="sec">Избранные блюда ${liked.length ? `<span class="count">${liked.length}</span>` : ''}</h2>
   <section class="cards">
@@ -384,12 +455,12 @@ function viewFav() {
   </section>
   <h2 class="sec">Вся книга рецептов <span class="count">${DB.length}</span></h2>
   <div class="book">
-    ${Object.entries(CATEGORIES).map(([k, c]) => `
+    ${groups.map(([c, list]) => `
       <details>
-        <summary>${c.emoji} ${c.name} <span class="count">${DB.filter((r) => r.cat === k).length}</span></summary>
-        <div class="book-list">${DB.filter((r) => r.cat === k).map((r) => `
+        <summary>${c.emoji} ${c.name} <span class="count">${list.length}</span></summary>
+        <div class="book-list">${list.map((r) => `
           <button class="row ${state.dislikes.includes(r.id) ? 'hidden-r' : ''}" data-act="open" data-id="${r.id}">
-            <span>${r.emoji} ${esc(r.name)}</span><small>${fmtNum(r.per.kcal)} ккал · ${r.time} мин</small>
+            <span>${r.emoji} ${esc(r.name)}${warnFor(r).length ? ' <small class="warn-t">⚠️</small>' : ''}</span><small>${fmtNum(r.per.kcal)} ккал · ${r.time} мин</small>
           </button>`).join('')}</div>
       </details>`).join('')}
   </div>`;
@@ -454,6 +525,11 @@ function viewSettings() {
     <p class="muted small">Ключ хранится только на этом телефоне и отправляется лишь в OpenRouter. Ключ берётся на openrouter.ai → Keys. КБЖУ и цены у ИИ-рецептов — оценка модели.</p>
   </section>
   <section class="panel">
+    <h2>⚠️ Аллергии</h2>
+    <p class="muted">Блюда с этими продуктами не прячутся, но помечаются предупреждением. ИИ их не использует.</p>
+    <div class="presets">${Object.entries(ALLERGENS).map(([k, al]) => `<button class="chip soft ${myAllergens().includes(k) ? 'on' : ''}" data-act="allergen" data-a="${k}">${al.emoji} ${al.name}</button>`).join('')}</div>
+  </section>
+  <section class="panel">
     <h2>🛒 Цены из магазина</h2>
     <p class="muted">По ним считается стоимость блюд и список покупок.</p>
     <div class="presets">${Object.entries(STORES).map(([k, n]) => `<button class="chip soft ${(s.store || 'avg') === k ? 'on' : ''}" data-act="store" data-s="${k}">${n}</button>`).join('')}</div>
@@ -495,10 +571,11 @@ function viewDetail() {
     </div>
     <div class="d-hero">
       ${emojiBubble(r, 'xl')}
-      <div class="card-top center">${catChip(r.cat)}${r.source === 'ai' ? '<span class="chip-ai">✨ ИИ</span>' : ''}${r.healthy ? '<span class="chip-ai green">🥦 полезное</span>' : ''}</div>
+      <div class="card-top center">${catChip(r.cat)}${r.source === 'ai' ? `<span class="chip-ai">${r.own ? '📝 мой рецепт' : '✨ ИИ'}</span>` : ''}${r.healthy ? '<span class="chip-ai green">🥦 полезное</span>' : ''}${r.kids ? '<span class="chip-ai">👶 детям</span>' : ''}${r.heavy >= 1 ? '<span class="chip-ai">🍖 сытное</span>' : ''}</div>
       <h2>${esc(r.name)}</h2>
       <div class="tags">${r.tags.map((t) => `<span>#${esc(t)}</span>`).join('')}</div>
     </div>
+    ${warnFor(r).map((al) => `<div class="warn"><b>⚠️ Осторожно: ${ALLERGENS[al].name}</b><span>В этом блюде есть ${ALLERGENS[al].name}. ${ALLERGENS[al].hint}</span></div>`).join('')}
 
     <div class="d-meta">
       <div><b>${r.time}</b><small>минут</small></div>
@@ -520,7 +597,7 @@ function viewDetail() {
 
     <h3 class="sec">🧺 Ингредиенты</h3>
     <ul class="ing">${r.items.map((i) => `
-      <li class="${i.pantry ? 'pantry' : ''}"><span>${esc(i.name)}${i.note ? ` <small>(${esc(i.note)})</small>` : ''}${i.pantry ? ' <small>· обычно есть дома</small>' : ''}</span><b>${esc(amountText(i, d.mult))}</b></li>`).join('')}
+      <li class="${i.pantry ? 'pantry' : ''} ${hasAllergen(i) ? 'allergen' : ''}"><span>${hasAllergen(i) ? '⚠️ ' : ''}${esc(i.name)}${i.note ? ` <small>(${esc(i.note)})</small>` : ''}${i.pantry ? ' <small>· обычно есть дома</small>' : ''}</span><b>${esc(amountText(i, d.mult))}</b></li>`).join('')}
     </ul>
     <div class="cost-line">Продукты на блюдо ≈ <b>${rub(r.cost * d.mult)}</b><br>Чек в магазине ≈ <b>${rub(shop)}</b> <small>(целыми упаковками, без того, что есть дома)</small></div>
     <button class="big-btn wide ${inCart(r.id) ? 'done' : ''}" data-act="cart" data-id="${esc(r.id)}">${inCart(r.id) ? '✓ В списке покупок' : '🛒 В список покупок'}</button>
@@ -528,10 +605,11 @@ function viewDetail() {
     <h3 class="sec">👩‍🍳 Как готовить</h3>
     <ol class="steps">${r.steps.map((s, i) => `<li class="${d.done.includes(i) ? 'done' : ''}" data-act="step" data-i="${i}"><span class="n">${i + 1}</span><span>${esc(s)}</span></li>`).join('')}</ol>
     <p class="muted small center">Нажми на шаг, чтобы отметить его выполненным</p>
-    ${r.src ? `<p class="muted small center">Источник рецепта: <a class="src" href="${esc(r.src)}" target="_blank" rel="noopener noreferrer">russianfood.com</a></p>` : ''}
+    ${r.src ? `<p class="muted small center">Источник рецепта: <a class="src" href="${esc(r.src)}" target="_blank" rel="noopener noreferrer">${esc(new URL(r.src).hostname.replace(/^(www|m)\./, ''))}</a></p>` : ''}
 
     ${sims.length ? `<h3 class="sec">Похожие блюда</h3><div class="scroller">${sims.map(miniCard).join('')}</div>` : ''}
     <button class="link center-b" data-act="dislike" data-id="${esc(r.id)}">${state.dislikes.includes(r.id) ? '↩︎ Снова предлагать это блюдо' : '🙅 Не предлагать это блюдо'}</button>
+    ${r.own ? `<button class="link center-b" data-act="delOwn" data-id="${esc(r.id)}">🗑 Удалить мой рецепт</button>` : ''}
   </div>`;
 }
 
@@ -655,8 +733,27 @@ const actions = {
     save('settings');
     location.reload();
   },
+  allergen: (el) => {
+    const cur = myAllergens(), k = el.dataset.a;
+    state.settings = { ...state.settings, allergens: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k] };
+    save('settings');
+    render();
+  },
+  addOpen: () => openAdd(),
+  addParse: () => parseOwnRecipe(),
+  delOwn: (el) => {
+    if (!confirm('Удалить этот рецепт?')) return;
+    const id = el.dataset.id;
+    state.ai = state.ai.filter((x) => x.id !== id);
+    state.likes = state.likes.filter((x) => x !== id);
+    state.cart = state.cart.filter((x) => x.id !== id);
+    AI = state.ai.map(buildAiRecipe); reindex();
+    save('ai', 'likes', 'cart');
+    closeDetail();
+  },
   pickModel: () => openPicker(),
   closePicker: () => closePicker(),
+  closeAdd: () => closePicker(),
   pickFilter: (el) => { picker.filter = el.dataset.f; renderPickerList(); },
   setModel: (el) => {
     state.settings = { ...state.settings, model: el.dataset.m };
@@ -800,38 +897,91 @@ function renderPickerList() {
     <p class="muted small center">Цена — за миллион токенов (запрос / ответ). Один рецепт обычно ~3 тыс. токенов.</p>`;
 }
 
+// ───────── свой рецепт из текста ─────────
+function openAdd() {
+  const el = $('#picker');
+  const hasKey = !!state.settings.key;
+  el.innerHTML = `
+  <div class="sheet-inner">
+    <div class="sheet-bar"><button class="round" data-act="closeAdd" aria-label="Закрыть">←</button><b>Свой рецепт</b><span style="width:44px"></span></div>
+    <p class="muted">Вставь текст рецепта с любого сайта, из заметок или сообщения: ингредиенты и шаги. ИИ разложит его по полочкам, посчитает КБЖУ и стоимость, а рецепт сохранится в книге на этом телефоне.</p>
+    <textarea id="ownText" class="search area" rows="10" placeholder="Например:&#10;Куриное филе 500 г, кабачок 1 шт, сметана 2 ст. л.…&#10;1. Нарежь…"></textarea>
+    ${hasKey ? '<button class="big-btn wide" data-act="addParse" id="addBtn">✨ Разобрать и сохранить</button>'
+      : '<p class="err">Для этого нужен ключ OpenRouter.</p><button class="link" data-act="tab" data-tab="settings">Подключить ИИ в «Ещё» →</button>'}
+    <p class="err" id="addErr"></p>
+  </div>`;
+  el.hidden = false;
+  el.classList.remove('in'); void el.offsetWidth; el.classList.add('in');
+  document.body.classList.add('locked');
+}
+async function parseOwnRecipe() {
+  const text = $('#ownText').value.trim();
+  const btn = $('#addBtn'), err = $('#addErr');
+  if (text.length < 40) { err.textContent = 'Вставь рецепт целиком: ингредиенты и шаги.'; return; }
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Разбираю…'; err.textContent = '';
+  try {
+    const data = await askJson(`Разбери этот рецепт в структуру. Не меняй сам рецепт: те же продукты, количества и шаги (шаги перескажи коротко, 4–8 штук, на «ты»). Если порций не указано — оцени.
+Верни ТОЛЬКО JSON: {"recipes":[${RECIPE_JSON}]}
+${JSON_RULES}
+
+Текст рецепта (между линиями):
+-----
+${text.slice(0, 8000)}
+-----`, 0.2);
+    const raw = (data.recipes || [data])[0];
+    if (!raw || !raw.name || !Array.isArray(raw.ingredients)) throw new Error('Не получилось разобрать рецепт. Попробуй ещё раз.');
+    const id = 'own-' + Date.now().toString(36);
+    state.ai = [{ ...raw, id, own: true }, ...state.ai];
+    AI = state.ai.map(buildAiRecipe); reindex();
+    save('ai');
+    closePicker();
+    render();
+    openDetail(id);
+    toast('Рецепт сохранён 📝');
+  } catch (e) {
+    err.textContent = e.message || 'Нет связи. Проверь интернет.';
+    btn.disabled = false; btn.textContent = '✨ Разобрать и сохранить';
+  }
+}
+
 // ───────── ИИ (OpenRouter) ─────────
+const RECIPE_JSON = `{"name":"…","emoji":"одно эмодзи","category":"breakfast|soup|main|salad|dessert","meal":"breakfast|lunch|dinner","time":минуты,"servings":порций,"healthy":true,"kids":false,"tags":["курица","быстро"],
+"ingredients":[{"name":"Куриное филе","amount":"500 г","grams":500,"section":"veg|meat|dairy|grocery|canned|frozen|bread|other","pack_label":"упаковка ~1 кг","pack_grams":1000,"price":480,"pantry":false}],
+"steps":["…","…"],"per_serving":{"kcal":0,"p":0,"f":0,"c":0}}`;
+const JSON_RULES = `pantry=true только для соли, сахара, специй и растительного масла. grams — вес в граммах (для штучных — примерный вес). price — цена всей упаковки pack_label в рублях (2026 год, обычные супермаркеты России). КБЖУ на одну порцию посчитай по граммовкам аккуратно. kids=true, если блюдо подходит ребёнку от 3 лет.`;
+
 function aiPrompt() {
   const f = state.filter;
-  const cat = f.cat === 'all' ? 'любые, лучше три разные категории' : CATEGORIES[f.cat].name;
+  const what = f.cat === 'all' ? 'меню на день: 1 завтрак (meal=breakfast), 1 обед — суп или основное блюдо (meal=lunch), 1 ужин полегче (meal=dinner)'
+    : f.cat === 'kids' ? 'меню на день для ребёнка от 3 лет: завтрак, обед и ужин (meal=breakfast|lunch|dinner); мягко, без острого, без жарки во фритюре, kids=true'
+    : `3 разных блюда категории «${CATEGORIES[f.cat].name}»`;
   const liked = state.likes.map(getR).filter(Boolean).slice(0, 12).map((r) => r.name);
   const known = [...DB, ...AI].map((r) => r.name).join(', ');
   const limits = [f.quick && 'готовка не дольше 30 минут', f.healthy && 'полезные блюда', f.light && 'не больше 450 ккал на порцию'].filter(Boolean);
-  return `Придумай 3 разных домашних блюда.
-Категория: ${cat}.
-${limits.length ? 'Ограничения: ' + limits.join(', ') + '.\n' : ''}${state.wish ? 'Пожелание: ' + state.wish + '\n' : ''}${liked.length ? 'Нравятся блюда: ' + liked.join(', ') + '. Учитывай этот вкус.\n' : ''}Не повторяй эти блюда: ${known}.
+  const banned = myAllergens().map((a) => ALLERGENS[a].name);
+  return `Подбери ${what}.
+${limits.length ? 'Ограничения: ' + limits.join(', ') + '.\n' : ''}${banned.length ? 'Аллергия, НЕ используй: ' + banned.join(', ') + '.\n' : ''}${state.wish ? 'Пожелание: ' + state.wish + '\n' : ''}${liked.length ? 'Семье нравятся: ' + liked.join(', ') + '. Учитывай этот вкус.\n' : ''}Не повторяй эти блюда: ${known}.
 
+Для кого: семья, которая старается не есть тяжёлую еду, но любит вкусно поесть.
 Требования:
-- вкусно и по возможности полезно, обычная домашняя кухня, понятные шаги;
+- только настоящие, широко известные блюда домашней кухни, которые есть в проверенных кулинарных книгах и на сайтах вроде russianfood.com или iamcook.ru; не выдумывай необычных сочетаний и названий; пропорции, температура и время — как в проверенных рецептах;
+- не жирно (жиры не больше ~35% калорий), не мучное (без теста, блинов, пирогов и горы макарон), без майонеза и сала, обычно не больше 550 ккал на порцию;
+- полезно, но не постно: сытно, с нормальной порцией белка (на обед и ужин от 20 г), вкусно — со специями, зеленью, соусами на йогурте или сметане;
 - только продукты, которые легко купить в обычных супермаркетах России (Пятёрочка, Магнит, Перекрёсток);
-- цены упаковок в рублях, реалистичные для 2026 года;
-- КБЖУ на одну порцию посчитай по граммовкам аккуратно.
+- шаги понятные, 4–7 штук, на «ты».
 
-Верни ТОЛЬКО JSON такого вида:
-{"recipes":[{"name":"…","emoji":"одно эмодзи","category":"breakfast|soup|main|salad|dessert","time":минуты,"servings":порций,"healthy":true,"tags":["курица","быстро"],
-"ingredients":[{"name":"Куриное филе","amount":"500 г","grams":500,"section":"veg|meat|dairy|grocery|canned|frozen|bread|other","pack_label":"упаковка ~1 кг","pack_grams":1000,"price":480,"pantry":false}],
-"steps":["…","…"],"per_serving":{"kcal":0,"p":0,"f":0,"c":0}}]}
-pantry=true только для соли, сахара, специй и растительного масла. grams — вес в граммах (для штучных — примерный вес). price — цена всей упаковки pack_label.`;
+Верни ТОЛЬКО JSON: {"recipes":[${RECIPE_JSON}]}
+${JSON_RULES}`;
 }
 
-async function callOpenRouter(useFormat) {
+async function callOpenRouter(useFormat, prompt = aiPrompt(), temperature = 0.7) {
   const { key, model } = state.settings;
   const body = {
     model: model || MODEL_PRESETS[0],
-    temperature: 0.9,
+    temperature,
     messages: [
-      { role: 'system', content: 'Ты — заботливый домашний повар и нутрициолог из России. Пишешь по-русски, коротко и тепло. Отвечаешь строго валидным JSON без пояснений.' },
-      { role: 'user', content: aiPrompt() },
+      { role: 'system', content: 'Ты — опытный домашний повар и нутрициолог из России. Предлагаешь только настоящие, проверенные рецепты. Пишешь по-русски, коротко и тепло. Отвечаешь строго валидным JSON без пояснений.' },
+      { role: 'user', content: prompt },
     ],
   };
   if (useFormat) body.response_format = { type: 'json_object' };
@@ -853,22 +1003,27 @@ async function callOpenRouter(useFormat) {
   return JSON.parse(text.slice(a, b + 1));
 }
 
+async function askJson(prompt, temperature) {
+  try { return await callOpenRouter(true, prompt, temperature); }
+  catch (e) { if (e.status === 400 || e instanceof SyntaxError) return callOpenRouter(false, prompt, temperature); throw e; }
+}
+
+const MEAL_LABEL = { breakfast: '☀️ Завтрак', lunch: '🍲 Обед', dinner: '🌙 Ужин' };
 async function generateAi() {
   if (state.aiLoading) return;
   state.aiLoading = true; state.aiError = ''; render();
   try {
-    let data;
-    try { data = await callOpenRouter(true); }
-    catch (e) { if (e.status === 400 || e instanceof SyntaxError) data = await callOpenRouter(false); else throw e; }
+    const data = await askJson(aiPrompt(), 0.7);
     const list = (data.recipes || []).slice(0, 3).filter((x) => x && x.name && Array.isArray(x.ingredients));
     if (!list.length) throw new Error('Не получилось разобрать ответ. Попробуй ещё раз.');
     const stamp = Date.now().toString(36);
     const raws = list.map((x, i) => ({ ...x, id: `ai-${stamp}-${i}` }));
     // храним последние 30 ИИ-рецептов, понравившиеся не удаляем никогда
-    state.ai = [...raws, ...state.ai].filter((x, i) => i < 30 || state.likes.includes(x.id));
+    state.ai = [...raws, ...state.ai].filter((x, i) => i < 30 || x.own || state.likes.includes(x.id));
     AI = state.ai.map(buildAiRecipe); reindex();
     state.aiCurrent = raws.map((x) => x.id);
-    save('ai', 'aiCurrent');
+    state.aiSlots = dayMode() ? raws.map((x) => MEAL_LABEL[x.meal] || '') : [];
+    save('ai', 'aiCurrent', 'aiSlots');
   } catch (e) {
     state.aiError = e.message || 'Нет связи. Проверь интернет.';
   } finally {

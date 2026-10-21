@@ -139,15 +139,34 @@ const PRODUCTS = {
   vinegar: p('Уксус', 'grocery', 11, 0, 0, 2.3, [500, '500 мл', 50], { ml: true, sp: 15, pantry: true }),
   cauliflower: p('Цветная капуста', 'frozen', 30, 2.5, 0.3, 5.4, [400, '400 г', 190]),
   spinach: p('Шпинат', 'frozen', 23, 2.9, 0.4, 2, [400, '400 г', 200]),
+
+  // Добавлено для рецептов с iamcook.ru
+  tomato_juice: p('Томатный сок', 'canned', 20, 1, 0.1, 3.8, [1000, '1 л', 140], { ml: true }),
+  starch: p('Крахмал картофельный', 'grocery', 343, 0.1, 0, 85, [500, '500 г', 90], { sp: 10 }),
+  celery: p('Сельдерей стеблевой', 'veg', 13, 0.9, 0.1, 2.1, [500, '~500 г', 150]),
 };
 
 // Категории блюд
 const CATEGORIES = {
-  breakfast: { name: 'Завтрак', emoji: '🍳', color: 'var(--c-breakfast)' },
-  soup: { name: 'Суп', emoji: '🍲', color: 'var(--c-soup)' },
-  main: { name: 'Горячее', emoji: '🍗', color: 'var(--c-main)' },
-  salad: { name: 'Салат', emoji: '🥗', color: 'var(--c-salad)' },
-  dessert: { name: 'Десерт', emoji: '🍰', color: 'var(--c-dessert)' },
+  breakfast: { name: 'Завтраки', one: 'Завтрак', emoji: '🍳', color: 'var(--c-breakfast)' },
+  soup: { name: 'Супы', one: 'Суп', emoji: '🍲', color: 'var(--c-soup)' },
+  main: { name: 'Основные блюда', one: 'Основное', emoji: '🍗', color: 'var(--c-main)' },
+  salad: { name: 'Салаты и закуски', one: 'Закуска', emoji: '🥗', color: 'var(--c-salad)' },
+  dessert: { name: 'Вкусненькое', one: 'Вкусненькое', emoji: '🍰', color: 'var(--c-dessert)' },
+};
+
+// Блюда из основной книги, которые подходят детям от 3 лет (мягкие, не острые, не жареные во фритюре)
+const KIDS = new Set(['syrniki', 'oatmeal-banana', 'omelet-veg', 'millet-pumpkin', 'casserole', 'chicken-noodle',
+  'pumpkin-soup', 'meatball-soup', 'fish-soup', 'turkey-cutlets', 'tefteli', 'pollock-veg', 'chicken-ragout',
+  'baked-apples', 'banana-pancakes', 'berry-smoothie', 'cottage-cream', 'oat-cookies', 'zucchini-fritters']);
+
+// Аллергены: по ключам продуктов и по названию (для рецептов от ИИ)
+const ALLERGENS = {
+  honey: { name: 'мёд', emoji: '🍯', keys: ['honey'], re: /м[её]д(?!ь)/i, hint: 'Мёд можно убрать или заменить сахаром либо сиропом.' },
+  nuts: { name: 'орехи', emoji: '🥜', keys: ['walnuts', 'sesame'], re: /орех|кунжут|миндал|фундук|арахис/i, hint: 'Орехи можно просто не добавлять.' },
+  fish: { name: 'рыба и морепродукты', emoji: '🐟', keys: ['pollock', 'hake', 'salmon', 'shrimp', 'tuna', 'crab_sticks', 'herring', 'red_caviar', 'saira'], re: /рыб|минтай|хек|с[её]мг|форел|кревет|краб|сельд|икр[аы]|тун[ец]|сайр/i, hint: '' },
+  eggs: { name: 'яйца', emoji: '🥚', keys: ['egg'], re: /яйц|желт/i, hint: '' },
+  milk: { name: 'молочное', emoji: '🥛', keys: ['milk', 'kefir', 'cottage', 'sour_cream', 'yogurt', 'cheese', 'mozzarella', 'feta', 'butter', 'cream', 'heavy_cream', 'processed_cheese', 'cream_cheese'], re: /молок|кефир|творог|сметан|йогурт|сыр|сливк|масло сливочное/i, hint: '' },
 };
 
 // r(id, название, эмодзи, категория, минут, порций, теги, полезное?, ингредиенты, шаги)
