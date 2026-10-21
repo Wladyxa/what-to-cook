@@ -110,7 +110,8 @@ function enrich(r) {
   const flour = solid.filter((i) => FLOURY.has(i.key) || (isAi(i) && FLOURY_RE.test(i.name))).reduce((s, i) => s + i.g, 0) / weight;
   let h = 0;
   if (kcal > 600) h += (kcal - 600) / 150;
-  if (fatShare > 0.45) h += (fatShare - 0.45) * 6;
+  // доля жира важна, только когда жира в порции заметно много (лёгкий салат на масле не «тяжёлый»)
+  if (fatShare > 0.45) h += (fatShare - 0.45) * 6 * Math.min(1, k.f / 18);
   const flourLimit = r.cat === 'dessert' ? 0.4 : 0.25;
   if (flour > flourLimit) h += (flour - flourLimit) * 4;
   for (const i of r.items) h += HEAVY_KEYS[i.key] || (isAi(i) && HEAVY_RE.test(i.name) ? 1.2 : 0);
